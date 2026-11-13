@@ -1,331 +1,103 @@
-from pathlib import Path
-import csv
-
 import cv2
 import numpy as np
 
+from config import (CAMERA_MATRIX_FILE, MAX_DEPTH, MAX_FEATURES, MIN_MATCHES,
+                    RANSAC_THRESHOLD_PX, RATIO_THRESHOLD, SUPPORTED_EXTENSIONS)
 
-# ---------- Configuration ----------
-
-IMAGE_DIR = Path("data/images")
-OUTPUT_DIR = Path("outputs")
-
-RATIO_THRESHOLD = 0.75
-RANSAC_PROBABILITY = 0.999
-RANSAC_THRESHOLD_PX = 1.0
-MIN_GOOD_MATCHES = 12
-
-SUPPORTED_EXTENSIONS = {".jpg", ".jpeg", ".png", ".bmp", ".tif", ".tiff"}
-
-
-# ---------- Image loading ----------
 
 def load_images(folder):
-    paths = sorted(
-        p for p in folder.iterdir()
-        if p.suffix.lower() in SUPPORTED_EXTENSIONS
-    )
-
-    if len(paths) < 2:
-        raise ValueError("Provide at least two photographs.")
-
+    paths = sorted((p for p in folder.iterdir() if p.suffix.lower() in SUPPORTED_EXTENSIONS),
+                   key=lambda p: p.name.lower())
     images = []
-
     for path in paths:
         image = cv2.imread(str(path), cv2.IMREAD_COLOR)
-
-        if image is None:
-            print(f"Skipping unreadable image: {path}")
-            continue
-
-        # Keep original resolution for the initial experiment.
-        gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
-        images.append((path, image, gray))
-
+        if image is not None:
+            images.append({"path": path, "image": image,
+                           "gray": cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)})
     if len(images) < 2:
-        raise ValueError("Fewer than two images could be loaded.")
-
+        raise ValueError(f"At least two readable photos are required in {folder}")
     return images
 
 
-# ---------- Camera intrinsics ----------
+def load_camera_matrix(shape):
+    height, width = shape[:2]
+    if CAMERA_MATRIX_FILE.exists():
+        matrix = np.load(CAMERA_MATRIX_FILE).astype(np.float64)
+        if matrix.shape != (3, 3):
+            raise ValueError("camera_matrix.npy must contain a 3x3 matrix")
+        return matrix
+    focal = float(max(width, height))
+    return np.array([[focal, 0.0, width / 2.0], [0.0, focal, height / 2.0],
+                     [0.0, 0.0, 1.0]], dtype=np.float64)
 
-def make_initial_camera_matrix(image_shape):
-    height, width = image_shape[:2]
-
-    # Rough initial guess only.
-    # Replace with calibrated or otherwise justified intrinsics later.
-    focal_guess = float(max(width, height))
-
-    K = np.array([
-        [focal_guess, 0.0, width / 2.0],
-        [0.0, focal_guess, height / 2.0],
-        [0.0, 0.0, 1.0],
-    ], dtype=np.float64)
-
-    return K
-
-
-# ---------- Feature detection and matching ----------
 
 def create_detector():
-    # SIFT is preferred for this baseline.
     if hasattr(cv2, "SIFT_create"):
-        return cv2.SIFT_create(nfeatures=5000), cv2.NORM_L2
-
-    # Fallback for installations without SIFT.
-    return cv2.ORB_create(nfeatures=5000), cv2.NORM_HAMMING
+        return cv2.SIFT_create(nfeatures=MAX_FEATURES), cv2.NORM_L2
+    return cv2.ORB_create(nfeatures=MAX_FEATURES), cv2.NORM_HAMMING
 
 
-def extract_features(gray, detector):
-    keypoints, descriptors = detector.detectAndCompute(gray, None)
-    return keypoints, descriptors
-
-
-def match_features(desc1, desc2, norm_type):
-    if desc1 is None or desc2 is None:
+def match_features(desc_a, desc_b, norm):
+    if desc_a is None or desc_b is None or len(desc_a) < 2 or len(desc_b) < 2:
         return []
-
-    matcher = cv2.BFMatcher(norm_type)
-
-    # k=2 is required for the ratio test.
-    candidates = matcher.knnMatch(desc1, desc2, k=2)
-
-    good = []
-
-    for pair in candidates:
-        if len(pair) != 2:
-            continue
-
-        first, second = pair
-
-        if first.distance < RATIO_THRESHOLD * second.distance:
-            good.append(first)
-
-    return good
+    matcher = cv2.BFMatcher(norm)
+    forward = matcher.knnMatch(desc_a, desc_b, k=2)
+    reverse = matcher.knnMatch(desc_b, desc_a, k=2)
+    accepted = {pair[0].queryIdx: pair[0] for pair in forward
+                if len(pair) == 2 and pair[0].distance < RATIO_THRESHOLD * pair[1].distance}
+    backward = {pair[0].queryIdx: pair[0].trainIdx for pair in reverse
+                if len(pair) == 2 and pair[0].distance < RATIO_THRESHOLD * pair[1].distance}
+    return [match for query, match in accepted.items() if backward.get(match.trainIdx) == query]
 
 
-# ---------- Relative camera pose ----------
-
-def estimate_relative_pose(kp1, kp2, matches, K):
-    if len(matches) < MIN_GOOD_MATCHES:
+def estimate_pair(first, second, matches, camera_a, camera_b):
+    if len(matches) < MIN_MATCHES:
         return None
-
-    points1 = np.float64([
-        kp1[m.queryIdx].pt for m in matches
-    ]).reshape(-1, 1, 2)
-
-    points2 = np.float64([
-        kp2[m.trainIdx].pt for m in matches
-    ]).reshape(-1, 1, 2)
-
-    E, ransac_mask = cv2.findEssentialMat(
-        points1,
-        points2,
-        K,
-        method=cv2.RANSAC,
-        prob=RANSAC_PROBABILITY,
-        threshold=RANSAC_THRESHOLD_PX,
-    )
-
-    if E is None or ransac_mask is None:
+    points_a = np.float64([first["keypoints"][m.queryIdx].pt for m in matches])
+    points_b = np.float64([second["keypoints"][m.trainIdx].pt for m in matches])
+    normal_a = cv2.undistortPoints(points_a.reshape(-1, 1, 2), camera_a, None).reshape(-1, 2)
+    normal_b = cv2.undistortPoints(points_b.reshape(-1, 1, 2), camera_b, None).reshape(-1, 2)
+    focal = np.mean([camera_a[0, 0], camera_a[1, 1], camera_b[0, 0], camera_b[1, 1]])
+    essential, ransac = cv2.findEssentialMat(normal_a, normal_b, np.eye(3), cv2.RANSAC,
+                                              0.999, RANSAC_THRESHOLD_PX / focal)
+    if essential is None or ransac is None or essential.shape != (3, 3):
         return None
-
-    # Some configurations can return multiple candidate essential matrices.
-    if E.shape != (3, 3):
+    count, rotation, translation, keep = cv2.recoverPose(essential, normal_a, normal_b,
+                                                          np.eye(3), mask=ransac.copy())
+    if count < MIN_MATCHES:
         return None
-
-    inlier_count, R, t, pose_mask = cv2.recoverPose(
-        E,
-        points1,
-        points2,
-        K,
-        mask=ransac_mask.copy(),
-    )
-
-    if pose_mask is None:
-        return None
-
-    ransac_inliers = int(np.count_nonzero(ransac_mask))
-    pose_inliers = int(np.count_nonzero(pose_mask))
-    total_matches = len(matches)
-
-    # OpenCV returns pose satisfying X2 = R @ X1 + t.
-    # The camera-center displacement in camera-1 coordinates is -R.T @ t.
-    camera_delta = -R.T @ t
-    camera_delta /= max(np.linalg.norm(camera_delta), 1e-12)
-
-    return {
-        "E": E,
-        "R": R,
-        "t": t,
-        "camera_delta_direction": camera_delta.reshape(3),
-        "total_matches": total_matches,
-        "ransac_inliers": ransac_inliers,
-        "pose_inliers": pose_inliers,
-        "ransac_inlier_ratio": ransac_inliers / total_matches,
-        "pose_inlier_ratio": pose_inliers / total_matches,
-        "points1": points1,
-        "points2": points2,
-        "pose_mask": pose_mask,
-    }
+    selected = keep.ravel() != 0
+    return rotation, translation.reshape(3), points_a[selected], points_b[selected]
 
 
-# ---------- Diagnostics ----------
-
-def save_match_visualization(
-    image1, kp1, image2, kp2, matches, pose_mask, output_path
-):
-    selected = [
-        match for match, keep in zip(matches, pose_mask.ravel())
-        if keep
-    ]
-
-    preview = cv2.drawMatches(
-        image1,
-        kp1,
-        image2,
-        kp2,
-        selected,
-        None,
-        flags=cv2.DrawMatchesFlags_NOT_DRAW_SINGLE_POINTS,
-    )
-
-    cv2.imwrite(str(output_path), preview)
-
-
-# ---------- Main pipeline ----------
-
-def main():
-    OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
-
-    images = load_images(IMAGE_DIR)
-    detector, norm_type = create_detector()
-
-    print(f"Loaded {len(images)} images.")
-    print(f"Feature detector: {type(detector).__name__}")
-
-    feature_data = []
-
-    for path, image, gray in images:
-        keypoints, descriptors = extract_features(gray, detector)
-
-        print(f"{path.name}: {len(keypoints)} keypoints")
-
-        feature_data.append({
-            "path": path,
-            "image": image,
-            "gray": gray,
-            "keypoints": keypoints,
-            "descriptors": descriptors,
-        })
-
-    # Initial version: estimate motion between consecutive photographs.
-    results = []
-
-    for i in range(len(feature_data) - 1):
-        first = feature_data[i]
-        second = feature_data[i + 1]
-
-        matches = match_features(
-            first["descriptors"],
-            second["descriptors"],
-            norm_type,
-        )
-
-        print(
-            f"\n{first['path'].name} -> {second['path'].name}: "
-            f"{len(matches)} ratio-test matches"
-        )
-
-        if len(matches) < MIN_GOOD_MATCHES:
-            print("Insufficient matches; skipping this pair.")
-            continue
-
-        K = make_initial_camera_matrix(first["gray"].shape)
-
-        result = estimate_relative_pose(
-            first["keypoints"],
-            second["keypoints"],
-            matches,
-            K,
-        )
-
+def reconstruct_sparse(images):
+    intrinsics = [load_camera_matrix(record["image"].shape) for record in images]
+    detector, norm = create_detector()
+    for record in images:
+        record["keypoints"], record["descriptors"] = detector.detectAndCompute(record["gray"], record["mask"])
+    rotation, center = np.eye(3), np.zeros(3)
+    clouds, colors = [], []
+    for index in range(len(images) - 1):
+        matches = match_features(images[index]["descriptors"], images[index + 1]["descriptors"], norm)
+        result = estimate_pair(images[index], images[index + 1], matches,
+                               intrinsics[index], intrinsics[index + 1])
         if result is None:
-            print("Pose estimation failed or was ambiguous.")
             continue
-
-        print(f"RANSAC inliers: {result['ransac_inliers']}")
-        print(f"Pose inliers: {result['pose_inliers']}")
-        print(
-            "RANSAC inlier ratio: "
-            f"{result['ransac_inlier_ratio']:.3f}"
-        )
-        print(
-            "Camera movement direction (unit vector): "
-            f"{result['camera_delta_direction']}"
-        )
-
-        # Save the geometric inlier visualization.
-        output_name = (
-            f"{first['path'].stem}_to_{second['path'].stem}_matches.jpg"
-        )
-
-        save_match_visualization(
-            first["image"],
-            first["keypoints"],
-            second["image"],
-            second["keypoints"],
-            matches,
-            result["pose_mask"],
-            OUTPUT_DIR / output_name,
-        )
-
-        results.append({
-            "image_1": first["path"].name,
-            "image_2": second["path"].name,
-            "total_matches": result["total_matches"],
-            "ransac_inliers": result["ransac_inliers"],
-            "pose_inliers": result["pose_inliers"],
-            "ransac_inlier_ratio": result["ransac_inlier_ratio"],
-            "pose_inlier_ratio": result["pose_inlier_ratio"],
-            "delta_x_direction": result["camera_delta_direction"][0],
-            "delta_y_direction": result["camera_delta_direction"][1],
-            "delta_z_direction": result["camera_delta_direction"][2],
-            "R": result["R"],
-            "t": result["t"],
-        })
-
-    # Save summary metrics; rotation and translation matrices are omitted
-    # here to keep the CSV readable.
-    csv_path = OUTPUT_DIR / "pairwise_motion.csv"
-
-    with csv_path.open("w", newline="", encoding="utf-8") as file:
-        columns = [
-            "image_1",
-            "image_2",
-            "total_matches",
-            "ransac_inliers",
-            "pose_inliers",
-            "ransac_inlier_ratio",
-            "pose_inlier_ratio",
-            "delta_x_direction",
-            "delta_y_direction",
-            "delta_z_direction",
-        ]
-
-        writer = csv.DictWriter(file, fieldnames=columns)
-        writer.writeheader()
-
-        for result in results:
-            writer.writerow({
-                key: result[key] for key in columns
-            })
-
-    print(f"\nSuccessful pairs: {len(results)}")
-    print(f"Summary saved to: {csv_path}")
-    print(f"Visualizations saved in: {OUTPUT_DIR.resolve()}")
-
-
-if __name__ == "__main__":
-    main()
+        relative_rotation, translation, points_a, points_b = result
+        next_rotation = rotation @ relative_rotation.T
+        next_center = center - next_rotation @ translation
+        world_to_a, world_to_b = rotation.T, next_rotation.T
+        project_a = intrinsics[index] @ np.hstack((world_to_a, -world_to_a @ center[:, None]))
+        project_b = intrinsics[index + 1] @ np.hstack((world_to_b, -world_to_b @ next_center[:, None]))
+        homogeneous = cv2.triangulatePoints(project_a, project_b, points_a.T, points_b.T)
+        valid = np.abs(homogeneous[3]) > 1e-10
+        points = (homogeneous[:3, valid] / homogeneous[3, valid]).T
+        points = points[np.isfinite(points).all(axis=1) & (np.abs(points[:, 2]) < MAX_DEPTH)]
+        if len(points):
+            clouds.append(points)
+            colors.append(np.tile(np.mean(images[index]["image"], axis=(0, 1)).astype(np.uint8),
+                                  (len(points), 1)))
+        rotation, center = next_rotation, next_center
+    if not clouds:
+        raise RuntimeError("No stable sparse points were reconstructed.")
+    return np.vstack(clouds), np.vstack(colors)
