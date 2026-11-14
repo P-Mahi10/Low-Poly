@@ -14,6 +14,10 @@ importance/
 ├── viz.py             # Visualizations: vertex coloring (PLY/OBJ), 2D projection overlays, polylines
 ├── mesh_prep.py       # Mesh validation, manifold check, repair, Taubin smoothing, normal calculation
 ├── cues_3d.py         # Multi-scale curvature, dihedral angles, sharp-edge feature curves, noise ratio, c3D, I3D
+├── cues_2d.py         # Bilateral denoise, multi-scale edges, contrast saliency, entropy, density norm, polylines
+├── lifting.py         # Multi-view 2D-to-3D projection, depth z-buffer occlusion, grazing weight, c2D variance
+├── fusion.py          # Gated fusion (c3D * I3D * (1 + beta * c2D * I2D)), Laplacian smoothing, sizing field
+├── guidance.py        # GuidanceOutput dataclass bundling all importance, curve, and confidence outputs
 ├── collapse_hooks.py  # Hooks interfacing with FA-QEM (quadric scaling, line quadrics, rejection rules)
 └── eval.py            # Geometric & topological evaluation metrics (Chamfer distance, silhouette IoU, manifoldness)
 ```
@@ -127,7 +131,49 @@ Mesh repair, topological validation, and volume-preserving Taubin smoothing.
 
 ---
 
-## 6. `importance/collapse_hooks.py`
+## 6. `importance/cues_2d.py`
+
+2D image cues, multi-scale edge detection, contrast saliency, texture density normalization, and Douglas-Peucker polylines.
+
+| Function / Class | Signature | Description |
+| :--- | :--- | :--- |
+| **`Cues2DOutput`** | `dataclass` | Packages 2D outputs: `I2D`, `edge_map`, `saliency_map`, `entropy_map`, and `polylines`. |
+| `edge_preserving_denoise` | `(gray_image, d=7, sigma_color=50, sigma_space=50)` | Bilateral filtering to suppress flat-region noise while keeping structural edges intact. |
+| `compute_multiscale_edges` | `(image_gray, sigmas=(1.0, 2.0, 4.0))` | Multi-scale gradient magnitude edge map using Gaussian smoothing and Sobel kernels. |
+| `compute_contrast_saliency`| `(image_gray)` | Center-surround difference-of-Gaussians (DoG) visual saliency. |
+| `compute_local_entropy` | `(image_gray, kernel_size=9)` | Sliding-window local entropy / texture activity measuring local information density. |
+| `normalize_local_density` | `(edge_map, kernel_size=15, suppression_factor=3.0)` | Downweights edge strength in high-density regions to suppress repetitive textures (fur, grass, carpet) relative to clean structural contours. |
+| `extract_2d_polylines` | `(edge_map, threshold=0.35, epsilon=2.0)` | Contours edge pixels above threshold and applies Douglas-Peucker simplification to extract 2D polylines. |
+| `compute_2d_cues` | `(image, mask=None, config=None)` | **Primary 2D Pipeline**: Bilateral denoise, multi-scale edge detection, density normalization, saliency/entropy boost, background masking, and normalized $I_{2D}$. |
+
+---
+
+## 7. `importance/lifting.py`
+
+Lifting multi-view 2D image cues onto 3D mesh vertices with occlusion culling and grazing angle weighting.
+
+| Function | Signature | Description |
+| :--- | :--- | :--- |
+| `render_mesh_z_buffer` | `(vertices, faces, camera)` | Rasterizes an exact analytical ray-plane depth map (z-buffer) of the mesh from the camera viewpoint. |
+| `sample_bilinear` | `(image_2d, u, v)` | Subpixel bilinear interpolation of scalar values at continuous coordinates $(u, v)$. |
+| `lift_2d_cues_to_vertices` | `(vertices, faces, vertex_normals, cameras, image_cues_list, config=None)` | **Primary Lifting Pipeline**: Projects vertices into calibrated camera views, performs z-buffer occlusion checks, weights views by grazing cosine $w_j = \max(0, n \cdot d_{\text{view}})^2$, computes multi-view weighted average $I_{2D}$, and calculates per-vertex confidence $c_{2D}$ penalized when views disagree (cross-view variance). |
+
+---
+
+## 8. `importance/fusion.py` & `importance/guidance.py`
+
+Gated multi-modal fusion, scalar Laplacian smoothing, and sizing field generation.
+
+| Function / Class | Signature | Description |
+| :--- | :--- | :--- |
+| **`GuidanceOutput`** | `dataclass` | Final guidance package: `importance`, `feature_curves`, `pinned_flags`, `confidence`, `I3D`, `I2D`, `c3D`, `c2D`, and `sizing_field`. |
+| `smooth_scalar_on_mesh` | `(values, neighbors, iterations=2, blend_weight=0.5)` | 1-ring neighborhood Laplacian smoothing on scalar arrays over the mesh. |
+| `compute_target_sizing_field` | `(importance, min_edge_len=0.02, max_edge_len=0.2)` | Calculates target mesh edge lengths inversely proportional to importance: $h(v) \propto \frac{1}{1 + I(v)}$. |
+| `fuse_and_package_guidance` | `(vertices, faces, cues_3d, lifted_I2D, c2D, config=None)` | **Primary Fusion Pipeline**: Executes gated formula $I = c_{3D} I_{3D} (1 + \beta c_{2D} I_{2D})$, normalizes via percentile clipping, applies mesh Laplacian smoothing, and packages all guidance outputs. |
+
+---
+
+## 9. `importance/collapse_hooks.py`
 
 Interfaces and predicates hooking feature importance directly into FA-QEM quadric decimation loops.
 
@@ -143,7 +189,7 @@ Interfaces and predicates hooking feature importance directly into FA-QEM quadri
 
 ---
 
-## 7. `importance/eval.py`
+## 10. `importance/eval.py`
 
 Geometric, silhouette, and topological evaluation metrics.
 
@@ -157,7 +203,7 @@ Geometric, silhouette, and topological evaluation metrics.
 
 ---
 
-## 8. `reference/collapse_loop.py`
+## 11. `reference/collapse_loop.py`
 
 Minimal reference decimation loop implementing the full importance-guided collapse algorithm.
 
