@@ -1,0 +1,24 @@
+flowchart TB
+    A["One image plus silhouette mask"] --> B["Edge preserving denoise<br/>bilateral or anisotropic diffusion"]
+
+    B --> C["Edge strength<br/>gradient or Hessian, multi scale"]
+    B --> D["Saliency map<br/>classical contrast based or pretrained"]
+    B --> E["Entropy map<br/>local window"]
+
+    C --> F["Local density normalization<br/>suppress dense texture such as fur or grass"]
+    F --> G["Edge map E2D"]
+    D --> H["Saliency map S2D"]
+    E --> I["Entropy map T2D"]
+
+    A --> O["Mask out background pixels"]
+    G --> J["Per pixel 2D importance I2D<br/>edge strength boosted by saliency and entropy"]
+    H --> J
+    I --> J
+    O --> J
+
+    C --> K["Keep edge pixels above threshold"]
+    K --> L["Trace chains and simplify<br/>Douglas Peucker"]
+    L --> M["2D feature polylines"]
+
+    J --> N["Output per view<br/>I2D map and polylines"]
+    M --> N

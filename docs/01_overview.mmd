@@ -1,0 +1,48 @@
+flowchart LR
+    subgraph IN["Inputs"]
+        A["Dense mesh<br/>V and F"]
+        B["Images"]
+        CAM["Camera data"]
+        C["Reference silhouette masks"]
+        D["Target polygon count N"]
+    end
+
+    subgraph IM["Feature importance module - mine"]
+        E["3D cues from mesh"]
+        F["2D cues from images"]
+        G["Lift 2D cues to vertices"]
+        H["Gated fusion"]
+        I["Package outputs"]
+    end
+
+    subgraph OUT["Importance outputs"]
+        J["importance per vertex"]
+        K["feature curves"]
+        L["pinned vertex flags"]
+        M["confidence per vertex"]
+    end
+
+    subgraph CL["Collapse loop - teammates"]
+        N["FA-QEM plus feature cost<br/>plus silhouette cost"]
+        O["Final low poly mesh"]
+    end
+
+    A --> E
+    B --> F
+    A --> G
+    CAM --> G
+    F --> G
+    E --> H
+    G --> H
+    H --> I
+    I --> J
+    I --> K
+    I --> L
+    I --> M
+    A --> N
+    C --> N
+    D --> N
+    J --> N
+    K --> N
+    L --> N
+    N --> O

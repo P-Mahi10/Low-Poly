@@ -1,0 +1,33 @@
+flowchart TB
+    A["Initial dense mesh"] --> B["Initialize FA-QEM quadrics"]
+    IMP["Importance per vertex"] --> B2["Scale each vertex quadric<br/>by its importance"]
+    B --> B2
+    FC["Feature curves"] --> B3["Add line quadrics<br/>along feature curves"]
+    B2 --> B3
+    B3 --> C["Generate candidate edges"]
+
+    C --> D["Geometric feature cost<br/>from endpoint importance"]
+    C --> E["Boundary area cost"]
+    C --> F["Silhouette error change<br/>project candidate into views"]
+    D --> G["Normalize each term"]
+    E --> G
+    F --> G
+    G --> H["Combined edge cost"]
+
+    H --> Q["Priority queue<br/>ties broken by edge id"]
+    Q --> R["Pop lowest cost edge"]
+    R --> R2{"Entry stale?<br/>version stamp mismatch"}
+    R2 -- "yes" --> Q
+    R2 -- "no" --> S{"Crosses feature curve or<br/>joins different pinned regions?"}
+    S -- "yes" --> T["Reject collapse"]
+    S -- "no" --> U{"Normal flip, topology,<br/>degeneracy check"}
+    U -- "invalid" --> T
+    U -- "valid" --> V["Perform edge collapse"]
+    T --> Q
+
+    V --> W["Merged vertex importance<br/>is the max of the two"]
+    W --> X["Update connectivity<br/>and record collapse history"]
+    X --> Y["Update local quadrics<br/>and silhouette costs"]
+    Y --> Z{"Target polygon count reached?"}
+    Z -- "no" --> Q
+    Z -- "yes" --> END["Final low poly mesh"]

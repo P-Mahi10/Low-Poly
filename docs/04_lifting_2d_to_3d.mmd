@@ -1,0 +1,24 @@
+flowchart TB
+    A["Vertex v with normal n"] --> B["Pick next view j"]
+    B --> C["Project v into image j<br/>using camera data"]
+    C --> D{"Inside image bounds?"}
+    D -- "no" --> X["Skip this view"]
+    D -- "yes" --> E{"Visible?<br/>compare with rendered depth"}
+    E -- "no" --> X
+    E -- "yes" --> F["Sample I2D at projected pixel<br/>bilinear"]
+    F --> G["View weight<br/>max of 0 and n dot view direction, squared"]
+    G --> H["Store sample and weight"]
+    H --> K{"More views?"}
+    X --> K
+    K -- "yes" --> B
+    K -- "no" --> Y{"Any valid view?"}
+
+    Y -- "no" --> Z["I2D = 0 and c2D = 0"]
+    Y -- "yes" --> L["Weighted average over views<br/>gives I2D for v"]
+    L --> M["Coherence check<br/>variance of samples across views"]
+    M --> N["c2D from total view weight<br/>reduced when views disagree"]
+
+    L --> O["Output I2D per vertex"]
+    N --> P["Output c2D per vertex"]
+    Z --> O
+    Z --> P
