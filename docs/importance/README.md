@@ -212,3 +212,25 @@ Minimal reference decimation loop implementing the full importance-guided collap
 | `compute_optimal_collapse_position_and_cost` | `(Q, v0, v1)` | Solves for the optimal merged vertex position $v^*$; falls back to endpoints and midpoint if singular. |
 | `reference_qem_decimate` | `(vertices, faces, target_faces, importance=None, feature_curves=None, pinned_flags=None, config=None)` | Executes priority-queue edge collapse with version stamps, applying importance quadric scaling, line quadrics, and rejection rules down to `target_faces`. Tested on 5k–20k face meshes. |
 
+---
+
+## 12. `importance/pipeline.py` & `scripts/pointcloud_to_mesh.py`
+
+Top-level orchestration entry points for end-to-end processing and point-cloud meshing.
+
+### `importance/pipeline.py`
+Orchestrates the complete flow: mesh loading $\to$ repair $\to$ 3D cues $\to$ 2D multi-view cues $\to$ lifting $\to$ gated fusion $\to$ vertex-colored mesh export $\to$ FA-QEM decimation $\to$ evaluation metrics.
+
+**Usage Example:**
+```powershell
+.\.venv\Scripts\python.exe -m importance.pipeline --mesh path/to/dense_mesh.ply --images data/images --cameras outputs/camera_poses.json --masks outputs/masks --target-faces 1000 --output outputs
+```
+
+### `scripts/pointcloud_to_mesh.py`
+Converts `outputs/subject_point_cloud.ply` into a triangular surface mesh ($V, F$) using Open3D Screened Poisson (with camera-oriented normals) or a robust Trimesh/Scipy fallback.
+
+**Usage Example:**
+```powershell
+.\.venv\Scripts\python.exe scripts/pointcloud_to_mesh.py --input outputs/subject_point_cloud.ply --output outputs/subject_mesh.ply --cameras outputs/camera_poses.json
+```
+
