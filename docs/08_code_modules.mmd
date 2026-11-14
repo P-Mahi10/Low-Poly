@@ -1,0 +1,18 @@
+flowchart LR
+    L["config.py<br/>weights, thresholds, seeds"]
+    A["io_utils.py<br/>load mesh, images, cameras"] --> B["mesh_prep.py<br/>repair, denoise, normals"]
+    B --> C["cues_3d.py<br/>curvature, dihedral, thickness, feature curves"]
+    A --> D["cues_2d.py<br/>denoise, edges, saliency, entropy, polylines"]
+    B --> E["lifting.py<br/>project, visibility, view weights"]
+    D --> E
+    C --> F["fusion.py<br/>gated fusion, normalize, smooth"]
+    E --> F
+    F --> G["guidance.py<br/>GuidanceOutput dataclass"]
+    G --> H["collapse_hooks.py<br/>quadric scaling, line quadrics, rejection rule"]
+    H --> I["collapse_loop.py<br/>teammates"]
+    G --> J["viz.py<br/>color mesh by any per vertex array"]
+    I --> K["eval.py<br/>metrics and ablations"]
+    G --> K
+    L --> C
+    L --> D
+    L --> F

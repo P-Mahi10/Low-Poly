@@ -1,0 +1,16 @@
+flowchart TB
+    A["I3D and c3D<br/>from 3D cues"] --> D["Gated fusion<br/>I = c3D times I3D times<br/>one plus beta times c2D times I2D"]
+    B["I2D and c2D<br/>from lifting"] --> D
+    C["Parameters<br/>beta, weights, thresholds"] --> D
+
+    D --> E["Normalize to 0 to 1<br/>percentile clipping"]
+    E --> F["Smooth over the mesh<br/>a few neighbor averaging steps"]
+    F --> G["Importance per vertex"]
+
+    G --> H["Pinned flags<br/>vertices on feature curves"]
+    G --> I["Optional sizing field<br/>target edge length from importance"]
+    G --> J["Debug views<br/>color mesh by I, I3D, I2D, disagreement"]
+
+    H --> K["GuidanceOutput<br/>importance, feature curves, pinned flags, confidence"]
+    I --> K
+    G --> K

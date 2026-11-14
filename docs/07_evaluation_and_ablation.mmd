@@ -1,0 +1,30 @@
+flowchart TB
+    A["Test meshes, images, cameras"] --> B["Run every configuration<br/>at the same polygon count N"]
+
+    B --> C1["A: plain QEM"]
+    B --> C2["B: FA-QEM"]
+    B --> C3["C: FA-QEM plus 3D importance only"]
+    B --> C4["D: FA-QEM plus 2D importance only"]
+    B --> C5["E: full fused importance plus pinning"]
+
+    C1 --> D["Low poly meshes"]
+    C2 --> D
+    C3 --> D
+    C4 --> D
+    C5 --> D
+
+    D --> E1["Geometry<br/>Chamfer distance, silhouette IoU"]
+    D --> E2["Topology<br/>valence histogram, minimum angle,<br/>flipped faces, manifoldness"]
+    D --> E3["Features<br/>edge flow ratio, feature curve preservation"]
+    D --> E4["Runtime and memory"]
+
+    E1 --> F["Tables and side by side renders"]
+    E2 --> F
+    E3 --> F
+    E4 --> F
+
+    B --> G["Rerun config E with fixed seeds"]
+    G --> H{"Output hashes identical?"}
+    H -- "yes" --> I["Deterministic: report it"]
+    H -- "no" --> J["Find nondeterminism<br/>unsorted sets, float reductions, random init"]
+    J --> G

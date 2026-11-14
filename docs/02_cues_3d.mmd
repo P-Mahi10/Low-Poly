@@ -1,0 +1,27 @@
+flowchart TB
+    A["Dense mesh V, F"] --> B["Validate and repair<br/>manifold check, remove degenerate faces"]
+    B --> C["Light denoise<br/>Taubin smoothing"]
+    C --> D["Face normals and vertex normals"]
+
+    D --> E["Multi scale curvature<br/>2 to 3 neighborhood sizes"]
+    D --> F["Dihedral angle per edge"]
+    D --> G["Thickness estimate<br/>ray based, optional"]
+
+    F --> H{"Angle above threshold?"}
+    H -- "yes" --> I["Mark sharp edge"]
+    H -- "no" --> J["Smooth edge"]
+    I --> K["Link sharp edges into chains"]
+    K --> L["Feature curves<br/>lists of vertex ids"]
+    L --> O["Pinned vertex flags"]
+
+    E --> M["Noise ratio<br/>fine scale over coarse scale"]
+    E --> N["Normalize curvature to 0 to 1"]
+    M --> P["Confidence c3D<br/>low when noise ratio is high"]
+
+    N --> Q["I3D as weighted sum of<br/>curvature, sharp edge strength, thinness"]
+    G --> Q
+    I --> Q
+
+    Q --> R["3D outputs<br/>I3D, c3D, feature curves, pinned flags"]
+    P --> R
+    O --> R
