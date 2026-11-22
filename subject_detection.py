@@ -1,5 +1,6 @@
 import cv2
 import numpy as np
+from pathlib import Path
 
 from config import (
     MASK_DIR,
@@ -75,4 +76,18 @@ def detect_subject_masks(images, segmenter):
         cv2.imwrite(str(MASK_DIR / f"{record['path'].stem}_mask.png"), chosen[3])
         print(f"{record['path'].name}: selected {chosen[2]} subject-mask pixels "
               f"(confidence {chosen[1]:.2f})")
+    return masks
+
+
+def load_supplied_masks(images, mask_folder):
+    masks = []
+    for record in images:
+        path = Path(mask_folder) / f"{record['path'].stem}.png"
+        mask = cv2.imread(str(path), cv2.IMREAD_GRAYSCALE)
+        if mask is None:
+            return None
+        if mask.shape != record["image"].shape[:2]:
+            mask = cv2.resize(mask, (record["image"].shape[1], record["image"].shape[0]),
+                              interpolation=cv2.INTER_NEAREST)
+        masks.append((mask >= 127).astype(np.uint8) * 255)
     return masks

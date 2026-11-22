@@ -4,10 +4,13 @@ from pathlib import Path
 
 import cv2
 import numpy as np
+from scipy.spatial import cKDTree
 
 from config import (CO3D_DEPTH_SAMPLE_STRIDE, CO3D_FOREGROUND_THRESHOLD,
                     CO3D_VOXEL_SIZE, CO3D_CONSISTENCY_VIEWS,
-                    CO3D_DEPTH_TOLERANCE, OUTPUT_DIR, PER_IMAGE_OUTPUT_DIR)
+                    CO3D_DEPTH_TOLERANCE, CO3D_OUTLIER_NEIGHBORS,
+                    CO3D_OUTLIER_MAD_SCALE, CO3D_COMPONENT_VOXEL_SIZE,
+                    OUTPUT_DIR, PER_IMAGE_OUTPUT_DIR)
 
 
 def save_ply(path, points, colors):
@@ -22,7 +25,7 @@ def save_ply(path, points, colors):
                        f"{int(color[2])} {int(color[1])} {int(color[0])}\n")
 
 
-def find_co3d_sequence(dataset_root):
+def find_co3d_pose_sequence(dataset_root):
     annotation_path = dataset_root / "frame_annotations.jgz"
     mask_folder = dataset_root / "masks"
     if not annotation_path.exists() or not mask_folder.is_dir():
@@ -51,6 +54,14 @@ def find_co3d_sequence(dataset_root):
     return (name, sorted(records, key=lambda record: record["frame_number"])) if error <= 2.0 else None
 
 
+def find_co3d_sequence(dataset_root):
+    depth_folder = dataset_root / "depths"
+    depth_mask_folder = dataset_root / "depth_masks"
+    if not depth_folder.is_dir() or not depth_mask_folder.is_dir():
+        return None
+    return find_co3d_pose_sequence(dataset_root)
+
+
 def co3d_camera_matrix(record):
     height, width = record["image"]["size"]
     focal_x, focal_y = record["viewpoint"]["focal_length"]
@@ -71,6 +82,47 @@ def voxel_downsample(points, colors, voxel_size):
     np.add.at(merged_points, inverse, points)
     np.add.at(merged_colors, inverse, colors)
     return merged_points / count[:, None], np.rint(merged_colors / count[:, None]).astype(np.uint8)
+
+
+def polish_point_cloud(points, colors):
+    finite = np.isfinite(points).all(axis=1)
+    points, colors = points[finite], colors[finite]
+    if len(points) < CO3D_OUTLIER_NEIGHBORS + 1:
+        return points, colors
+    distances = cKDTree(points).query(points, k=CO3D_OUTLIER_NEIGHBORS + 1)[0][:, -1]
+    median = np.median(distances)
+    deviation = np.median(np.abs(distances - median))
+    maximum = median + CO3D_OUTLIER_MAD_SCALE * max(1.4826 * deviation, 1e-8)
+    keep = distances <= maximum
+    points, colors = points[keep], colors[keep]
+    keys = np.floor(points / CO3D_COMPONENT_VOXEL_SIZE).astype(np.int64)
+    unique, inverse = np.unique(keys, axis=0, return_inverse=True)
+    voxel_counts = np.bincount(inverse)
+    lookup = {tuple(key): index for index, key in enumerate(unique)}
+    labels = np.full(len(unique), -1, dtype=np.int32)
+    component_sizes = []
+    for start in range(len(unique)):
+        if labels[start] != -1:
+            continue
+        label = len(component_sizes)
+        stack = [start]
+        labels[start] = label
+        size = 0
+        while stack:
+            index = stack.pop()
+            size += voxel_counts[index]
+            key = unique[index]
+            for dx in (-1, 0, 1):
+                for dy in (-1, 0, 1):
+                    for dz in (-1, 0, 1):
+                        neighbor = lookup.get((key[0] + dx, key[1] + dy, key[2] + dz))
+                        if neighbor is not None and labels[neighbor] == -1:
+                            labels[neighbor] = label
+                            stack.append(neighbor)
+        component_sizes.append(size)
+    largest = int(np.argmax(component_sizes))
+    keep = labels[inverse] == largest
+    return points[keep], colors[keep]
 
 
 def load_co3d_frame(dataset_root, record):
@@ -189,6 +241,7 @@ def reconstruct_co3d(dataset_root, sequence_name, records):
         raise RuntimeError("No valid CO3D depth points were available.")
     points, colors = voxel_downsample(np.vstack(all_points), np.vstack(all_colors),
                                       CO3D_VOXEL_SIZE)
+    points, colors = polish_point_cloud(points, colors)
     save_ply(OUTPUT_DIR / "subject_point_cloud.ply", points, colors)
     poses = [{"image": Path(record["image"]["path"]).name,
               "rotation_camera_to_world": record["viewpoint"]["R"],

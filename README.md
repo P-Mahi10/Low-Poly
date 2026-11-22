@@ -14,10 +14,12 @@ reconstruction path automatically.
 - `run_pipeline.py` runs the complete workflow.
 - `subject_detection.py` finds the subject automatically and saves masks for
   ordinary photo folders.
-- `photogrammetry.py` matches subject features, estimates camera movement, and
-  triangulates a sparse cloud for ordinary photos.
-- `point_cloud.py` builds and writes point clouds. When CO3D data is present,
-  it uses the dataset's supplied masks, camera annotations, and depth maps.
+- `stage2.py` performs feature extraction, feature matching, camera-pose
+  estimation, pair refinement, and sparse reconstruction.
+- `stage3.py` decodes depth maps, exports per-image clouds, checks agreement
+  between views, fuses the depth maps, and writes the cleaned dense cloud.
+- `photogrammetry.py` and `point_cloud.py` preserve the original public entry
+  points for other project files.
 - `config.py` contains shared folders and adjustable settings.
 
 ## Current CO3D data
@@ -28,9 +30,8 @@ detects it from `frame_annotations.jgz` and uses `images/`, `masks/`,
 poses. It back-projects valid foreground depth pixels with the supplied camera
 geometry and produces a dense PLY point cloud.
 
-CO3D mode currently writes one point cloud per image without combining views.
-Each PLY contains the visible subject surface from one camera and is saved in
-`outputs/per_image/`.
+CO3D mode writes one point cloud per image in `outputs/per_image/` and fuses
+the geometrically consistent foreground points into one cleaned dense cloud.
 
 The result is written to `outputs/subject_point_cloud.ply` and can be opened in
 Blender, MeshLab, or CloudCompare.
