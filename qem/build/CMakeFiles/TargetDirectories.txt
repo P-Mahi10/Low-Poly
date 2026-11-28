@@ -1,0 +1,3 @@
+/home/zom/Projects/qem/build/CMakeFiles/lowpoly.dir
+/home/zom/Projects/qem/build/CMakeFiles/edit_cache.dir
+/home/zom/Projects/qem/build/CMakeFiles/rebuild_cache.dir

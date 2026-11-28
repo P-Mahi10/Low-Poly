@@ -1,0 +1,1 @@
+/usr/bin/c++ -O3 -DNDEBUG -Wl,--dependency-file=CMakeFiles/lowpoly.dir/link.d CMakeFiles/lowpoly.dir/main.cpp.o -o lowpoly  /usr/lib/libopencv_imgcodecs.so.5.0.0 /usr/lib/libgmpxx.so /lib/libmpfr.so /lib/libgmp.so /usr/lib/libopencv_imgproc.so.5.0.0 /usr/lib/libopencv_geometry.so.5.0.0 /usr/lib/libopencv_flann.so.5.0.0 /usr/lib/libopencv_core.so.5.0.0

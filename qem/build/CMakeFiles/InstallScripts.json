@@ -1,0 +1,7 @@
+{
+	"InstallScripts" : 
+	[
+		"/home/zom/Projects/qem/build/cmake_install.cmake"
+	],
+	"Parallel" : false
+}
